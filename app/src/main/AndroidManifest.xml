@@ -1,13 +1,25 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application>
+
+    <application
+        android:label="微信网络精简"
+        android:supportsRtl="true">
+
+        <!-- LSPosed 基础元数据 -->
         <meta-data
             android:name="xposedmodule"
             android:value="true" />
         <meta-data
             android:name="xposeddescription"
-            android:value="微信网络提示与横幅纯净精简模块" />
+            android:value="隐藏微信当前网络不可用横幅和 Toast 提示" />
         <meta-data
             android:name="xposedminversion"
             android:value="93" />
+
+        <!-- 关键：推荐作用域，安装后在 LSPosed 中会自动勾选微信 -->
+        <meta-data
+            android:name="xposedscope"
+            android:value="com.tencent.mm" />
+
     </application>
+
 </manifest>
