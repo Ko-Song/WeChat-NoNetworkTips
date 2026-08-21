@@ -17,18 +17,25 @@ public class MainHook implements IXposedHookLoadPackage {
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
-        if (!lpparam.packageName.equals("com.tencent.mm")) return;
+        // 精准过滤：只在微信【UI主进程】中运行，过滤掉 push、appbrand 等子进程
+        if (!lpparam.processName.equals("com.tencent.mm")) return;
 
-        XposedBridge.log("WeChatShield: 微信已加载，开始 Hook...");
+        XposedBridge.log("WeChatShield: [UI主进程] 已加载，开始 Hook...");
+
+        // 1. Toast 拦截
         initToastBlocker();
-        initDebugBannerBlocker(lpparam.classLoader);
+
+        // 2. 主进程 Banner 追踪
+        initBannerBlocker(lpparam.classLoader);
     }
 
-    private void initDebugBannerBlocker(ClassLoader cl) {
+    private void initBannerBlocker(ClassLoader cl) {
         String targetClass = "com.tencent.mm.ui.conversation.banner.k0";
-        
+
         try {
+            // 在主进程中寻找 targetClass
             Class<?> clazz = XposedHelpers.findClass(targetClass, cl);
+
             for (java.lang.reflect.Method method : clazz.getDeclaredMethods()) {
                 String methodName = method.getName();
                 if (methodName.equals("toString") || methodName.equals("hashCode")) continue;
@@ -36,13 +43,14 @@ public class MainHook implements IXposedHookLoadPackage {
                 XposedBridge.hookMethod(method, new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) {
-                        XposedBridge.log("WeChatShield: [追踪] 调用了 " + param.method.getName());
+                        XposedBridge.log("WeChatShield: [横幅方法调用] " + param.method.getName());
                     }
                 });
             }
-            XposedBridge.log("WeChatShield: [追踪] 已成功 Hook 类 " + targetClass + " 下的所有方法！");
+            XposedBridge.log("WeChatShield: [主进程] " + targetClass + " 所有方法 Hook 成功！");
         } catch (Throwable e) {
-            XposedBridge.log("WeChatShield: [错误] 追踪初始化失败: " + e.toString());
+            // 抓取主进程报错的具体原因
+            XposedBridge.log("WeChatShield: [主进程错误] 无法 Hook " + targetClass + " -> " + e.toString());
         }
     }
 
