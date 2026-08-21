@@ -7,7 +7,7 @@
 * **全局 Toast 拦截**：无差别拦截微信的Toast弹窗，并在日志中输出原始内容。
 ## 使用方法
 1. 进入本仓库的 **Actions** 页面，点击最近一次成功构建的工作流（Workflow）。
-2. 在页面的**Upload APK Artifact**下 **Artifacts** 区域结尾下载构建产物，解压后安装 APK 文件。
+2. 在页面的**Upload APK Artifact**区域结尾处的URL下载构建产物，解压后安装 APK 文件。
 3. 在 LSPosed 管理器中启用模块，并将作用域勾选为微信 (`com.tencent.mm`)。
 4. 强行停止微信后重新打开。
 ## 免责声明
