@@ -4,6 +4,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
 import android.widget.Toast;
+import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicInteger;
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
@@ -14,24 +15,44 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 public class MainHook implements IXposedHookLoadPackage {
 
     private static final AtomicInteger toastCounter = new AtomicInteger(0);
+    private static boolean isPcHooked = false;
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
         if (!lpparam.processName.equals("com.tencent.mm")) return;
 
-        // 1. 保持 Toast 拦截
+        // 1. 保持已经成功生效的 Toast 拦截
         initToastBlocker();
 
-        // 2. 挂载我们刚刚通过静态逆向找到的核心错误分发器
-        initErrorProcessorHook(lpparam.classLoader);
+        // 2. 通过动态监听 ClassLoader 来安全挂载目标类（解决多DEX找不到类的问题）
+        initDynamicClassHook(lpparam.classLoader);
     }
 
-    private void initErrorProcessorHook(ClassLoader cl) {
-        String targetClass = "com.tencent.mm.ui.pc";
-        String targetMethod = "a";
-
+    private void initDynamicClassHook(ClassLoader baseCl) {
         try {
-            XposedHelpers.findAndHookMethod(targetClass, cl, targetMethod, 
+            XposedHelpers.findAndHookMethod(ClassLoader.class, "loadClass", String.class, boolean.class, new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    String className = (String) param.args[0];
+                    if ("com.tencent.mm.ui.pc".equals(className)) {
+                        Class<?> clazz = (Class<?>) param.getResult();
+                        if (clazz != null && !isPcHooked) {
+                            isPcHooked = true;
+                            XposedBridge.log("WeChatShield: [动态捕捉] 成功捕获到延迟加载的目标类: com.tencent.mm.ui.pc");
+                            hookErrorProcessor(clazz);
+                        }
+                    }
+                }
+            });
+        } catch (Throwable e) {
+            XposedBridge.log("WeChatShield: 动态 ClassLoader 监听失败: " + e.getMessage());
+        }
+    }
+
+    private void hookErrorProcessor(Class<?> clazz) {
+        try {
+            // 精准 Hook 静态方法 a
+            XposedHelpers.findAndHookMethod(clazz, "a", 
                 android.content.Context.class, int.class, int.class, String.class, int.class, 
                 new XC_MethodHook() {
                     @Override
@@ -40,19 +61,18 @@ public class MainHook implements IXposedHookLoadPackage {
                         int errCode = (Integer) param.args[2];
                         String extra = (String) param.args[3];
                         
-                        // 打印日志，当网络横幅出现时，看看这里捕获到了什么错误码
-                        XposedBridge.log("WeChatShield: [错误分发捕获] errType=" + errType + ", errCode=" + errCode + ", info=" + extra);
+                        XposedBridge.log("WeChatShield: [错误分发捕获] 拦截到错误下发 -> errType=" + errType + ", errCode=" + errCode + ", info=" + extra);
                     }
 
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) {
-                        // 后续我们可以在这里根据 errType/errCode 强行干预返回值
-                        // param.setResult(true); 
+                        // 如果想直接阻断该方法底层的弹窗逻辑，可以取消下面这行的注释
+                        // param.setResult(true);
                     }
                 });
-            XposedBridge.log("WeChatShield: [静态逆向] com.tencent.mm.ui.pc.a 挂载成功！");
+            XposedBridge.log("WeChatShield: [静态逆向] com.tencent.mm.ui.pc.a 方法挂载成功！");
         } catch (Throwable e) {
-            XposedBridge.log("WeChatShield: [静态逆向] 挂载失败: " + e.getMessage());
+            XposedBridge.log("WeChatShield: com.tencent.mm.ui.pc.a 方法挂载异常: " + e.getMessage());
         }
     }
 
@@ -82,8 +102,11 @@ public class MainHook implements IXposedHookLoadPackage {
                         }
                     } catch (Throwable ignored) {}
 
-                    param.setResult(null);
-                    XposedBridge.log("WeChatShield: [Toast屏蔽] #" + id + " 内容: " + (content == null ? "未知" : content));
+                    // 针对网络连接提示进行专属屏蔽，其他正常 Toast 放行（如果你想全屏屏蔽可以保留 param.setResult(null)）
+                    if (content != null && content.contains("当前无法连接网络")) {
+                        param.setResult(null);
+                        XposedBridge.log("WeChatShield: [精准Toast屏蔽] #" + id + " 已拦截网络提示: " + content);
+                    }
                 }
             });
         } catch (Throwable e) {
