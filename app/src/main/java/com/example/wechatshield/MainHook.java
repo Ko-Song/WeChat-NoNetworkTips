@@ -56,21 +56,52 @@ public class MainHook implements IXposedHookLoadPackage {
                 }
             });
         } catch (Throwable e) {
-            XposedBridge.log("WeChatShield:横幅 Hook 异常: " + e.getMessage());
+            XposedBridge.log("WeChatShield: 横幅 Hook 异常: " + e.getMessage());
         }
     }
 
     private void initToastBlocker() {
         try {
+            XposedHelpers.findAndHookMethod(Toast.class, "makeText", android.content.Context.class, CharSequence.class, int.class, new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    Toast toast = (Toast) param.getResult();
+                    if (toast != null && param.args[1] != null) {
+                        XposedHelpers.setAdditionalInstanceField(toast, "toast_text", param.args[1].toString());
+                    }
+                }
+            });
             XposedHelpers.findAndHookMethod(Toast.class, "show", new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
+                    Toast toast = (Toast) param.thisObject;
+                    String content = "";
+                    try {
+                        content = (String) XposedHelpers.getAdditionalInstanceField(toast, "toast_text");
+                        if (content == null) {
+                            View view = (View) XposedHelpers.callMethod(toast, "getView");
+                            content = extractText(view);
+                        }
+                    } catch (Throwable ignored) {}
+
                     param.setResult(null);
-                    XposedBridge.log("WeChatShield: [Toast拦截] 无差别拦截并阻止了一次微信 Toast 弹出");
+                    XposedBridge.log("WeChatShield: [Toast拦截] 无差别拦截 Toast，原内容: " + (content != null && !content.isEmpty() ? content : "未知文本/自定义View"));
                 }
             });
         } catch (Throwable e) {
             XposedBridge.log("WeChatShield: Toast Hook 异常: " + e.getMessage());
         }
+    }
+
+    private String extractText(View view) {
+        if (view instanceof TextView) return ((TextView) view).getText().toString();
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                String sub = extractText(group.getChildAt(i));
+                if (!sub.isEmpty()) return sub;
+            }
+        }
+        return "";
     }
 }
