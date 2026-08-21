@@ -17,7 +17,6 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      # 锁定使用稳定的 Gradle 8.7 版本，避免被自动升级到不兼容的 Gradle 9
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
@@ -26,8 +25,15 @@ jobs:
       - name: Build Debug APK
         run: gradle assembleDebug
 
+      # 自动重命名 APK，带上版本号
+      - name: Rename APK
+        run: |
+          VERSION="1.0.${{ github.run_number }}"
+          mkdir -p build_output
+          cp app/build/outputs/apk/debug/app-debug.apk build_output/WeChatShield-v$VERSION.apk
+
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: wehat-shield-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: WeChatShield-v${{ github.run_number }}
+          path: build_output/*.apk
