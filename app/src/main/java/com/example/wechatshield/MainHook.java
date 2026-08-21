@@ -4,6 +4,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
 import android.widget.Toast;
+import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicInteger;
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
@@ -17,15 +18,12 @@ public class MainHook implements IXposedHookLoadPackage {
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
-        // 精准过滤：只在微信【UI主进程】中运行，过滤掉 push、appbrand 等子进程
         if (!lpparam.processName.equals("com.tencent.mm")) return;
 
-        XposedBridge.log("WeChatShield: [UI主进程] 已加载，开始 Hook...");
-
-        // 1. Toast 拦截
+        // 1. 保持 Toast 拦截
         initToastBlocker();
 
-        // 2. 主进程 Banner 追踪
+        // 2. 智能容错的 Banner 拦截
         initBannerBlocker(lpparam.classLoader);
     }
 
@@ -33,24 +31,41 @@ public class MainHook implements IXposedHookLoadPackage {
         String targetClass = "com.tencent.mm.ui.conversation.banner.k0";
 
         try {
-            // 在主进程中寻找 targetClass
+            // 尝试在这个 ClassLoader 中寻找目标类
             Class<?> clazz = XposedHelpers.findClass(targetClass, cl);
+            
+            XposedBridge.log("WeChatShield: 成功在当前 ClassLoader 中定位到类: " + targetClass);
 
-            for (java.lang.reflect.Method method : clazz.getDeclaredMethods()) {
+            // 遍历并拦截该类的所有方法，重点处理布尔返回值或直接让其失效
+            for (Method method : clazz.getDeclaredMethods()) {
                 String methodName = method.getName();
                 if (methodName.equals("toString") || methodName.equals("hashCode")) continue;
 
                 XposedBridge.hookMethod(method, new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) {
-                        XposedBridge.log("WeChatShield: [横幅方法调用] " + param.method.getName());
+                        // 打印被调用的方法名，帮助我们确认到底是哪个方法在作祟
+                        // XposedBridge.log("WeChatShield: 触发方法 -> " + param.method.getName());
+                    }
+
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        try {
+                            // 如果方法返回布尔值，且原本要求显示（true），直接强行篡改并压制为 false
+                            if (param.getResult() instanceof Boolean && (Boolean) param.getResult()) {
+                                param.setResult(false);
+                                XposedBridge.log("WeChatShield: [成功拦截] 已将 " + param.method.getName() + " 的返回值篡改为 false");
+                            }
+                        } catch (Throwable ignored) {}
                     }
                 });
             }
-            XposedBridge.log("WeChatShield: [主进程] " + targetClass + " 所有方法 Hook 成功！");
+            XposedBridge.log("WeChatShield: [成功] " + targetClass + " 的方法群已全部纳入拦截网！");
+
+        } catch (XposedHelpers.ClassNotFoundError e) {
+            // 正常的 ClassLoader 隔离现象，静默忽略，等待正确的 ClassLoader 出现
         } catch (Throwable e) {
-            // 抓取主进程报错的具体原因
-            XposedBridge.log("WeChatShield: [主进程错误] 无法 Hook " + targetClass + " -> " + e.toString());
+            XposedBridge.log("WeChatShield: Banner 拦截异常: " + e.getMessage());
         }
     }
 
