@@ -4,7 +4,6 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
 import android.widget.Toast;
-import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicInteger;
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
@@ -23,49 +22,37 @@ public class MainHook implements IXposedHookLoadPackage {
         // 1. 保持 Toast 拦截
         initToastBlocker();
 
-        // 2. 智能容错的 Banner 拦截
-        initBannerBlocker(lpparam.classLoader);
+        // 2. 挂载我们刚刚通过静态逆向找到的核心错误分发器
+        initErrorProcessorHook(lpparam.classLoader);
     }
 
-    private void initBannerBlocker(ClassLoader cl) {
-        String targetClass = "com.tencent.mm.ui.conversation.banner.k0";
+    private void initErrorProcessorHook(ClassLoader cl) {
+        String targetClass = "com.tencent.mm.ui.pc";
+        String targetMethod = "a";
 
         try {
-            // 尝试在这个 ClassLoader 中寻找目标类
-            Class<?> clazz = XposedHelpers.findClass(targetClass, cl);
-            
-            XposedBridge.log("WeChatShield: 成功在当前 ClassLoader 中定位到类: " + targetClass);
-
-            // 遍历并拦截该类的所有方法，重点处理布尔返回值或直接让其失效
-            for (Method method : clazz.getDeclaredMethods()) {
-                String methodName = method.getName();
-                if (methodName.equals("toString") || methodName.equals("hashCode")) continue;
-
-                XposedBridge.hookMethod(method, new XC_MethodHook() {
+            XposedHelpers.findAndHookMethod(targetClass, cl, targetMethod, 
+                android.content.Context.class, int.class, int.class, String.class, int.class, 
+                new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) {
-                        // 打印被调用的方法名，帮助我们确认到底是哪个方法在作祟
-                        // XposedBridge.log("WeChatShield: 触发方法 -> " + param.method.getName());
+                        int errType = (Integer) param.args[1];
+                        int errCode = (Integer) param.args[2];
+                        String extra = (String) param.args[3];
+                        
+                        // 打印日志，当网络横幅出现时，看看这里捕获到了什么错误码
+                        XposedBridge.log("WeChatShield: [错误分发捕获] errType=" + errType + ", errCode=" + errCode + ", info=" + extra);
                     }
 
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) {
-                        try {
-                            // 如果方法返回布尔值，且原本要求显示（true），直接强行篡改并压制为 false
-                            if (param.getResult() instanceof Boolean && (Boolean) param.getResult()) {
-                                param.setResult(false);
-                                XposedBridge.log("WeChatShield: [成功拦截] 已将 " + param.method.getName() + " 的返回值篡改为 false");
-                            }
-                        } catch (Throwable ignored) {}
+                        // 后续我们可以在这里根据 errType/errCode 强行干预返回值
+                        // param.setResult(true); 
                     }
                 });
-            }
-            XposedBridge.log("WeChatShield: [成功] " + targetClass + " 的方法群已全部纳入拦截网！");
-
-        } catch (XposedHelpers.ClassNotFoundError e) {
-            // 正常的 ClassLoader 隔离现象，静默忽略，等待正确的 ClassLoader 出现
+            XposedBridge.log("WeChatShield: [静态逆向] com.tencent.mm.ui.pc.a 挂载成功！");
         } catch (Throwable e) {
-            XposedBridge.log("WeChatShield: Banner 拦截异常: " + e.getMessage());
+            XposedBridge.log("WeChatShield: [静态逆向] 挂载失败: " + e.getMessage());
         }
     }
 
