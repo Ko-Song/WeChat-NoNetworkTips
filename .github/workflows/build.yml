@@ -17,6 +17,13 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      # 关键：缓存 Android 默认签名目录，确保每次云编译的签名完全一致，支持直接覆盖安装
+      - name: Cache Android Keystore
+        uses: actions/cache@v4
+        with:
+          path: ~/.android
+          key: android-debug-keystore-${{ github.repository }}
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
